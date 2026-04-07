@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "NutriTak (Vite dev)",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["/Users/clairefenart/Documents/WORK/AI Projects/NutriTak/node_modules/.bin/vite", "--port", "5173"],
+      "port": 5173
+    }
+  ]
+}
