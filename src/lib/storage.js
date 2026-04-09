@@ -45,3 +45,25 @@ export async function getHistory() {
 export async function upsertHistory(entry) {
   await db.history.put(entry)
 }
+
+// ─── Entries (food / water / exercise) ────────────────────────────────────────
+
+export async function getEntriesByDate(date = today()) {
+  return await db.entries.where('date').equals(date).toArray()
+}
+
+export async function getAllEntries() {
+  return await db.entries.orderBy('date').reverse().toArray()
+}
+
+export async function saveEntry(entry) {
+  return await db.entries.put(entry)
+}
+
+export async function deleteEntry(id) {
+  await db.entries.delete(id)
+}
+
+export async function updateEntry(entry) {
+  await db.entries.put(entry)
+}

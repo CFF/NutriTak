@@ -11,3 +11,10 @@ db.version(2).stores({
   profile: 'id',
   history: 'key'
 })
+
+db.version(3).stores({
+  logs: 'date',
+  profile: 'id',
+  history: 'key',
+  entries: '++id, date, type'
+})
