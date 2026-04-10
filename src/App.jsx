@@ -18,6 +18,31 @@ const C = {
   emptyBg:  "#EAEDE8",
 };
 
+// ─── Typography tokens ────────────────────────────────────────────────
+const T = {
+  ui:      "'Inter', sans-serif",
+  display: "'Caveat Brush', cursive",
+};
+
+// ─── Shadow tokens ────────────────────────────────────────────────────
+const SH = {
+  activeCard: "0 1px 8px rgba(28,25,23,.08)",
+  card:       "0 2px 16px rgba(28,25,23,.14)",
+  modal:      "0 -8px 48px rgba(28,25,23,.18)",
+  fab:        "0 4px 20px rgba(196,89,58,.4)",
+};
+
+// ─── Motion tokens ────────────────────────────────────────────────────
+const M = {
+  stagger:   40,   // ms per FAB item
+  gauge:     "stroke-dashoffset .5s ease, stroke .4s",
+  heroColor: "color .4s",
+  macroFill: "width .5s ease",
+  fabSpin:   "transform .2s ease",
+  saveBg:    "background .3s",
+  sheet:     ".28s cubic-bezier(0.25, 1, 0.5, 1)",
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -121,14 +146,14 @@ function ArcGauge({ net, floor, goal }) {
         {net > 0 && (
           <path d={arcPath} fill="none" stroke={color} strokeWidth={10} strokeLinecap="round"
             strokeDasharray={ARC_LENGTH} strokeDashoffset={fillOffset}
-            style={{ transition: "stroke-dashoffset .5s ease, stroke .4s" }} />
+            style={{ transition: M.gauge }} />
         )}
       </svg>
       <div style={{ position: "absolute", bottom: 22, left: 0, right: 0, display: "flex", flexDirection: "column", alignItems: "center", pointerEvents: "none" }}>
-        <span style={{ fontFamily: "'Caveat Brush', cursive", fontSize: 64, lineHeight: 1, color: heroColor, transition: "color .4s" }}>
+        <span style={{ fontFamily: T.display, fontSize: 64, lineHeight: 1, color: heroColor, transition: M.heroColor }}>
           {Math.abs(remaining).toLocaleString()}
         </span>
-        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted, marginTop: 2 }}>
+        <span style={{ fontFamily: T.ui, fontSize: 13, color: C.muted, marginTop: 2 }}>
           kcal remaining
         </span>
       </div>
@@ -141,12 +166,12 @@ function MacroBar({ label, consumed, target, opacity = 1 }) {
   const pct = Math.min(consumed / Math.max(target, 1), 1);
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 700, color: C.black }}>{consumed}g</span>
+      <span style={{ fontFamily: T.ui, fontSize: 15, fontWeight: 700, color: C.black }}>{consumed}g</span>
       <div role="progressbar" aria-label={label} aria-valuenow={consumed} aria-valuemin={0} aria-valuemax={target}
         style={{ width: "60%", height: 6, background: C.divider, borderRadius: 99 }}>
-        <div style={{ width: `${pct * 100}%`, height: "100%", background: C.terra, opacity, borderRadius: 99, transition: "width .5s ease", minWidth: pct > 0 ? 6 : 0 }} />
+        <div style={{ width: `${pct * 100}%`, height: "100%", background: C.terra, opacity, borderRadius: 99, transition: M.macroFill, minWidth: pct > 0 ? 6 : 0 }} />
       </div>
-      <span aria-hidden="true" style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted }}>{label}</span>
+      <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 11, color: C.muted }}>{label}</span>
     </div>
   );
 }
@@ -155,7 +180,7 @@ function MacroBar({ label, consumed, target, opacity = 1 }) {
 function DateStrip() {
   const week = buildWeek();
   return (
-    <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", padding: "8px 10px 10px", borderBottom: `0.5px solid ${C.divider}` }}>
+    <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", padding: "8px 8px 12px", borderBottom: `0.5px solid ${C.divider}` }}>
       {week.map(({ date, offset }) => {
         const isToday   = offset === 0;
         const isFuture  = offset > 0;
@@ -167,14 +192,14 @@ function DateStrip() {
           : { width: 28, height: 28, borderRadius: "50%", border: `1.5px dashed ${C.muted}`, display: "flex", alignItems: "center", justifyContent: "center", opacity: isFuture ? 0.4 : 1 };
 
         const numStyle = {
-          fontFamily: "'Inter', sans-serif",
+          fontFamily: T.ui,
           fontSize: 11,
           fontWeight: isToday ? 700 : 400,
           color: isToday ? C.black : C.muted,
         };
 
         const labelStyle = {
-          fontFamily: "'Inter', sans-serif",
+          fontFamily: T.ui,
           fontSize: 11,
           fontWeight: isToday ? 600 : 400,
           color: isToday ? C.black : C.muted,
@@ -188,7 +213,7 @@ function DateStrip() {
               padding: isToday ? "7px 6px 8px" : "7px 6px 8px",
               background: isToday ? C.card : "transparent",
               borderRadius: isToday ? 12 : 0,
-              boxShadow: isToday ? "0 1px 8px rgba(28,25,23,.08)" : "none",
+              boxShadow: isToday ? SH.activeCard : "none",
               minWidth: 36,
             }}>
             <span style={labelStyle}>{dayLabel}</span>
@@ -232,28 +257,28 @@ function LogEntry({ entry, onUpdate, onDelete, isLast }) {
   const valueColor = entry.type === 'exercise' ? C.terra : C.black;
 
   if (editing) return (
-    <li style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: isLast ? 0 : 6, background: C.emptyBg, borderRadius: 14, listStyle: "none" }}>
+    <li style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", marginBottom: isLast ? 0 : 6, background: C.emptyBg, borderRadius: 14, listStyle: "none" }}>
       <label htmlFor={`edit-name-${entry.id}`} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>Name</label>
       <input id={`edit-name-${entry.id}`} value={editName} onChange={e => setEditName(e.target.value)}
         onKeyDown={e => e.key === "Enter" && commit()}
-        style={{ flex: 1, fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.black, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.terra}`, outline: "none", padding: "2px 0" }} />
+        style={{ flex: 1, fontFamily: T.ui, fontSize: 13, color: C.black, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.terra}`, outline: "none", padding: "2px 0" }} />
       <label htmlFor={`edit-val-${entry.id}`} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>{entry.type === 'water' ? 'Amount in ml' : 'Calories'}</label>
       <input id={`edit-val-${entry.id}`} value={editVal} type="number" onChange={e => setEditVal(e.target.value)}
         onKeyDown={e => e.key === "Enter" && commit()}
-        style={{ width: 54, fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.terra, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.terra}`, outline: "none", textAlign: "right", padding: "2px 0" }} />
-      <span aria-hidden="true" style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted }}>{entry.type === 'water' ? 'ml' : 'kcal'}</span>
+        style={{ width: 54, fontFamily: T.ui, fontSize: 13, color: C.terra, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.terra}`, outline: "none", textAlign: "right", padding: "2px 0" }} />
+      <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 11, color: C.muted }}>{entry.type === 'water' ? 'ml' : 'kcal'}</span>
       <button onClick={commit} aria-label="Save changes" style={{ background: "none", border: "none", cursor: "pointer", color: C.terra, fontSize: 18, padding: "4px", minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</button>
       <button onClick={cancel} aria-label="Cancel editing" style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, fontSize: 18, padding: "4px", minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
     </li>
   );
 
   return (
-    <li style={{ display: "flex", alignItems: "center", padding: "10px 14px", marginBottom: isLast ? 0 : 6, background: C.emptyBg, borderRadius: 14, gap: 8, listStyle: "none" }}>
+    <li style={{ display: "flex", alignItems: "center", padding: "12px 14px", marginBottom: isLast ? 0 : 6, background: C.emptyBg, borderRadius: 14, gap: 8, listStyle: "none" }}>
       <div style={{ flex: 1 }}>
-        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 400, color: C.black }}>{entry.name}</div>
-        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.muted, marginTop: 1 }}>{formatTime(entry.loggedAt)}</div>
+        <div style={{ fontFamily: T.ui, fontSize: 13, fontWeight: 400, color: C.black }}>{entry.name}</div>
+        <div style={{ fontFamily: T.ui, fontSize: 12, color: C.muted, marginTop: 1 }}>{formatTime(entry.loggedAt)}</div>
       </div>
-      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 600, color: valueColor }}>{valueLabel}</span>
+      <span style={{ fontFamily: T.ui, fontSize: 13, fontWeight: 600, color: valueColor }}>{valueLabel}</span>
       <button onClick={() => setEditing(true)} aria-label={`Edit ${entry.name}`}
         style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: "4px", minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -310,14 +335,14 @@ function Sheet({ onClose, label, title, children }) {
     <>
       <div onClick={onClose} aria-hidden="true" style={{ position: "fixed", inset: 0, zIndex: 99, background: "rgba(28,25,23,.45)" }} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={label}
-        style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, zIndex: 100, background: C.bg, borderRadius: "22px 22px 0 0", padding: "16px 20px 52px", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 -8px 48px rgba(28,25,23,.18)", animation: "nt-sheet-in .28s cubic-bezier(0.25, 1, 0.5, 1) both" }}>
+        style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, zIndex: 100, background: C.bg, borderRadius: "22px 22px 0 0", padding: "16px 20px 52px", maxHeight: "88vh", overflowY: "auto", boxShadow: SH.modal, animation: `nt-sheet-in ${M.sheet} both` }}>
         {/* Drag handle */}
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
           <div aria-hidden="true" style={{ width: 36, height: 4, background: C.divider, borderRadius: 99 }} />
         </div>
         {/* Title + close */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase" }}>{title}</p>
+          <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase" }}>{title}</p>
           <button ref={closeBtnRef} onClick={onClose} aria-label="Close" className="nt-close-btn"
             style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", marginRight: -8 }}>
             <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -397,28 +422,28 @@ function FoodSheet({ onAdd, onClose }) {
     onClose();
   };
 
-  const inputStyle = { width: "100%", fontFamily: "'Inter', sans-serif", fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none", marginBottom: 12 };
-  const btnPrimary = { width: "100%", padding: "14px", background: C.terra, border: "none", borderRadius: 12, fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer" };
+  const inputStyle = { width: "100%", fontFamily: T.ui, fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none", marginBottom: 12 };
+  const btnPrimary = { width: "100%", padding: "14px", background: C.terra, border: "none", borderRadius: 12, fontFamily: T.ui, fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer" };
 
   if (phase === "confirm" && result) {
     const scaled = (v) => Math.round(v * servings);
     const STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5];
     return (
       <div>
-        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 16 }}>Does this look right?</p>
+        <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 16 }}>Does this look right?</p>
         <div style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.divider}`, padding: "16px", marginBottom: 16 }}>
-          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 16, fontWeight: 600, color: C.black, marginBottom: 4 }}>{result.name}</div>
-          {result.portion && <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.muted, marginBottom: 12 }}>{result.portion}</div>}
+          <div style={{ fontFamily: T.ui, fontSize: 16, fontWeight: 600, color: C.black, marginBottom: 4 }}>{result.name}</div>
+          {result.portion && <div style={{ fontFamily: T.ui, fontSize: 12, color: C.muted, marginBottom: 12 }}>{result.portion}</div>}
           <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontFamily: "'Caveat Brush', cursive", fontSize: 36, color: C.terra }}>{scaled(result.calories)}</div>
-              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted }}>kcal</div>
+              <div style={{ fontFamily: T.display, fontSize: 36, color: C.terra }}>{scaled(result.calories)}</div>
+              <div style={{ fontFamily: T.ui, fontSize: 11, color: C.muted }}>kcal</div>
             </div>
             <div style={{ flex: 1, display: "flex", gap: 8, alignItems: "center" }}>
               {[["Pro", result.protein], ["Car", result.carbs], ["Fat", result.fats]].map(([l, v]) => (
                 <div key={l} style={{ flex: 1, textAlign: "center" }}>
-                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 600, color: C.black }}>{scaled(v)}g</div>
-                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted }}>{l}</div>
+                  <div style={{ fontFamily: T.ui, fontSize: 14, fontWeight: 600, color: C.black }}>{scaled(v)}g</div>
+                  <div style={{ fontFamily: T.ui, fontSize: 11, color: C.muted }}>{l}</div>
                 </div>
               ))}
             </div>
@@ -429,27 +454,27 @@ function FoodSheet({ onAdd, onClose }) {
               <button key={s} onClick={() => setServings(s)}
                 aria-label={`${s} serving${s !== 1 ? "s" : ""}`}
                 aria-pressed={servings === s}
-                style={{ padding: "6px 12px", borderRadius: 99, border: `1.5px solid ${servings === s ? C.terra : C.divider}`, background: servings === s ? C.terra : "transparent", color: servings === s ? "#fff" : C.black, fontFamily: "'Inter', sans-serif", fontSize: 12, cursor: "pointer" }}>
+                style={{ padding: "6px 12px", borderRadius: 99, border: `1.5px solid ${servings === s ? C.terra : C.divider}`, background: servings === s ? C.terra : "transparent", color: servings === s ? "#fff" : C.black, fontFamily: T.ui, fontSize: 12, cursor: "pointer" }}>
                 {s}×
               </button>
             ))}
           </div>
         </div>
         <button onClick={confirmAdd} style={btnPrimary}>Add to log</button>
-        <button onClick={() => { setPhase("input"); setResult(null); }} style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>Start over</button>
+        <button onClick={() => { setPhase("input"); setResult(null); }} style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: T.ui, fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>Start over</button>
       </div>
     );
   }
 
   if (phase === "clarify") return (
     <div>
-      <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 12 }}>One quick question</p>
-      <div style={{ background: C.card, borderRadius: 12, border: `1px solid ${C.divider}`, padding: "14px 16px", marginBottom: 12, fontFamily: "'Inter', sans-serif", fontSize: 14, color: C.black }}>{clarifyQ}</div>
+      <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 12 }}>One quick question</p>
+      <div style={{ background: C.card, borderRadius: 12, border: `1px solid ${C.divider}`, padding: "14px 16px", marginBottom: 12, fontFamily: T.ui, fontSize: 14, color: C.black }}>{clarifyQ}</div>
       <label htmlFor="food-clarify-input" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>Your answer</label>
       <input id="food-clarify-input" ref={inputRef} value={clarifyA} onChange={e => setClarifyA(e.target.value)}
         onKeyDown={e => e.key === "Enter" && submitClarify()}
         placeholder="Your answer…" style={inputStyle} />
-      {error && <p role="alert" style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.red, marginBottom: 10 }}>{error}</p>}
+      {error && <p role="alert" style={{ fontFamily: T.ui, fontSize: 12, color: C.red, marginBottom: 8 }}>{error}</p>}
       <button onClick={submitClarify} disabled={loading || !clarifyA.trim()} aria-busy={loading} style={{ ...btnPrimary, opacity: loading || !clarifyA.trim() ? 0.5 : 1 }}>
         {loading ? "Looking up…" : "Continue"}
       </button>
@@ -462,7 +487,7 @@ function FoodSheet({ onAdd, onClose }) {
       <input id="food-input" ref={inputRef} value={text} onChange={e => setText(e.target.value)}
         onKeyDown={e => e.key === "Enter" && submit()}
         placeholder="e.g. bowl of oatmeal with berries…" style={inputStyle} />
-      {error && <p role="alert" style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.red, marginBottom: 10 }}>{error}</p>}
+      {error && <p role="alert" style={{ fontFamily: T.ui, fontSize: 12, color: C.red, marginBottom: 8 }}>{error}</p>}
       <button onClick={submit} disabled={loading || !text.trim()} aria-busy={loading} style={{ ...btnPrimary, opacity: loading || !text.trim() ? 0.5 : 1 }}>
         {loading ? "Looking up…" : "Look up"}
       </button>
@@ -486,22 +511,22 @@ function WaterSheet({ onAdd, onClose }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         {presets.map((ml, i) => (
           <button key={ml} ref={i === 0 ? firstPresetRef : null} onClick={() => addWater(ml)}
             aria-label={`Add ${ml} millilitres of water`}
-            style={{ flex: 1, padding: "18px 0", background: C.card, border: `1px solid ${C.divider}`, borderRadius: 14, fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 600, color: C.black, cursor: "pointer" }}>
+            style={{ flex: 1, padding: "18px 0", background: C.card, border: `1px solid ${C.divider}`, borderRadius: 14, fontFamily: T.ui, fontSize: 15, fontWeight: 600, color: C.black, cursor: "pointer" }}>
             {ml}ml
           </button>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8 }}>
         <label htmlFor="water-custom-input" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>Custom amount in millilitres</label>
         <input id="water-custom-input" value={custom} onChange={e => setCustom(e.target.value)} type="number"
           onKeyDown={e => e.key === "Enter" && custom && addWater(parseInt(custom, 10))}
-          placeholder="Custom ml" style={{ flex: 1, fontFamily: "'Inter', sans-serif", fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none" }} />
+          placeholder="Custom ml" style={{ flex: 1, fontFamily: T.ui, fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none" }} />
         <button onClick={() => custom && addWater(parseInt(custom, 10))} disabled={!custom}
-          style={{ padding: "14px 20px", background: C.terra, border: "none", borderRadius: 12, fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer", opacity: custom ? 1 : 0.4 }}>
+          style={{ padding: "14px 20px", background: C.terra, border: "none", borderRadius: 12, fontFamily: T.ui, fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer", opacity: custom ? 1 : 0.4 }}>
           Add
         </button>
       </div>
@@ -544,22 +569,22 @@ function ExerciseSheet({ onAdd, onClose }) {
     onClose();
   };
 
-  const inputStyle = { width: "100%", fontFamily: "'Inter', sans-serif", fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none", marginBottom: 12 };
-  const btnPrimary = { width: "100%", padding: "14px", background: C.terra, border: "none", borderRadius: 12, fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer" };
+  const inputStyle = { width: "100%", fontFamily: T.ui, fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none", marginBottom: 12 };
+  const btnPrimary = { width: "100%", padding: "14px", background: C.terra, border: "none", borderRadius: 12, fontFamily: T.ui, fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer" };
 
   if (phase === "confirm" && result) return (
     <div>
-      <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 16 }}>Does this look right?</p>
+      <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 16 }}>Does this look right?</p>
       <div style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.divider}`, padding: "16px", marginBottom: 16 }}>
-        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 16, fontWeight: 600, color: C.black, marginBottom: 4 }}>{result.name}</div>
-        {result.duration && <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.muted, marginBottom: 12 }}>{result.duration}</div>}
+        <div style={{ fontFamily: T.ui, fontSize: 16, fontWeight: 600, color: C.black, marginBottom: 4 }}>{result.name}</div>
+        {result.duration && <div style={{ fontFamily: T.ui, fontSize: 12, color: C.muted, marginBottom: 12 }}>{result.duration}</div>}
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span style={{ fontFamily: "'Caveat Brush', cursive", fontSize: 36, color: C.terra }}>−{result.caloriesBurned}</span>
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted }}>kcal burned</span>
+          <span style={{ fontFamily: T.display, fontSize: 36, color: C.terra }}>−{result.caloriesBurned}</span>
+          <span style={{ fontFamily: T.ui, fontSize: 13, color: C.muted }}>kcal burned</span>
         </div>
       </div>
       <button onClick={confirmAdd} style={btnPrimary}>Log exercise</button>
-      <button onClick={() => { setPhase("input"); setResult(null); }} style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>Start over</button>
+      <button onClick={() => { setPhase("input"); setResult(null); }} style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: T.ui, fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>Start over</button>
     </div>
   );
 
@@ -569,7 +594,7 @@ function ExerciseSheet({ onAdd, onClose }) {
       <input id="exercise-input" ref={inputRef} value={text} onChange={e => setText(e.target.value)}
         onKeyDown={e => e.key === "Enter" && submit()}
         placeholder="e.g. 30 min run, yoga, cycling…" style={inputStyle} />
-      {error && <p role="alert" style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.red, marginBottom: 10 }}>{error}</p>}
+      {error && <p role="alert" style={{ fontFamily: T.ui, fontSize: 12, color: C.red, marginBottom: 8 }}>{error}</p>}
       <button onClick={submit} disabled={loading || !text.trim()} aria-busy={loading} style={{ ...btnPrimary, opacity: loading || !text.trim() ? 0.5 : 1 }}>
         {loading ? "Looking up…" : "Look up"}
       </button>
@@ -605,28 +630,28 @@ function FAB({ open, onToggle, onSelect }) {
       )}
 
       {/* Sub-action cards — horizontal row, centered independently */}
-      <div style={{ position: "fixed", bottom: 28 + 52 + 12, left: "50%", transform: "translateX(-50%)", zIndex: 60, display: "flex", flexDirection: "row", alignItems: "flex-end", gap: 10, pointerEvents: open ? "auto" : "none" }}>
+      <div style={{ position: "fixed", bottom: 28 + 52 + 12, left: "50%", transform: "translateX(-50%)", zIndex: 60, display: "flex", flexDirection: "row", alignItems: "flex-end", gap: 8, pointerEvents: open ? "auto" : "none" }}>
         {actions.map((action, i) => (
           <button key={action.key}
             onClick={() => { onToggle(); onSelect(action.key); }}
             tabIndex={open ? 0 : -1}
             style={{
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-              gap: 10,
+              gap: 8,
               padding: "18px 12px 14px",
               background: C.card,
               border: "none",
               borderRadius: 18,
-              boxShadow: "0 2px 16px rgba(28,25,23,.14)",
+              boxShadow: SH.card,
               cursor: "pointer",
               color: C.black,
-              fontFamily: "'Inter', sans-serif",
+              fontFamily: T.ui,
               fontSize: 13,
               fontWeight: 500,
               width: 90,
               opacity: open ? 1 : 0,
               transform: open ? "translateY(0) scale(1)" : "translateY(16px) scale(0.95)",
-              transition: `opacity .2s ease ${i * 40}ms, transform .2s ease ${i * 40}ms`,
+              transition: `opacity .2s ease ${i * M.stagger}ms, transform .2s ease ${i * M.stagger}ms`,
             }}>
             <span style={{ color: C.muted, display: "flex" }}>{action.icon}</span>
             {action.label}
@@ -636,8 +661,8 @@ function FAB({ open, onToggle, onSelect }) {
 
       {/* Main FAB — own fixed element, centered by its own 52px width */}
       <button onClick={onToggle} aria-label={open ? "Close menu" : "Log food, water or exercise"}
-        style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: C.terra, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 20px rgba(196,89,58,.4)" }}>
-        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 24, fontWeight: 300, color: "#fff", lineHeight: 1, transform: open ? "rotate(45deg)" : "rotate(0deg)", transition: "transform .2s ease", display: "block" }}>+</span>
+        style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: C.terra, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: SH.fab }}>
+        <span style={{ fontFamily: T.ui, fontSize: 24, fontWeight: 300, color: "#fff", lineHeight: 1, transform: open ? "rotate(45deg)" : "rotate(0deg)", transition: M.fabSpin, display: "block" }}>+</span>
       </button>
     </>
   );
@@ -651,7 +676,7 @@ function BottomNav({ tab, onTab }) {
       <button onClick={() => onTab(key)} aria-label={label} aria-current={active ? "page" : undefined}
         style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: "pointer", padding: "4px 12px", minWidth: 44, minHeight: 44, justifyContent: "center" }}>
         {icon(active ? C.terra : C.muted)}
-        <span aria-hidden="true" style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: active ? C.terra : C.muted }}>
+        <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 11, color: active ? C.terra : C.muted }}>
           {label}
         </span>
       </button>
@@ -709,14 +734,14 @@ function HistoryScreen() {
   };
 
   if (days === null) {
-    return <div aria-live="polite" aria-busy="true" style={{ padding: "40px 20px", fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted }}>Loading…</div>;
+    return <div aria-live="polite" aria-busy="true" style={{ padding: "40px 20px", fontFamily: T.ui, fontSize: 13, color: C.muted }}>Loading…</div>;
   }
 
   return (
     <div style={{ padding: "32px 20px" }}>
-      <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 24 }}>History</p>
+      <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 24 }}>History</p>
       {days.length === 0 ? (
-        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
+        <p style={{ fontFamily: T.ui, fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
           No past logs yet. Start tracking today and they'll appear here.
         </p>
       ) : (
@@ -724,16 +749,16 @@ function HistoryScreen() {
           {days.map((day, i) => (
             <li key={day.date} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: i === days.length - 1 ? "none" : `0.5px solid ${C.divider}` }}>
               <div>
-                <time dateTime={day.date} style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: C.black }}>{formatDate(day.date)}</time>
+                <time dateTime={day.date} style={{ fontFamily: T.ui, fontSize: 14, color: C.black }}>{formatDate(day.date)}</time>
                 {(day.exercise > 0 || day.water > 0) && (
-                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted, marginTop: 2 }}>
+                  <div style={{ fontFamily: T.ui, fontSize: 11, color: C.muted, marginTop: 2 }}>
                     {day.exercise > 0 && `−${day.exercise} burned`}
                     {day.exercise > 0 && day.water > 0 && "  ·  "}
                     {day.water > 0 && `${day.water}ml water`}
                   </div>
                 )}
               </div>
-              <span aria-label={`${day.net} kcal`} style={{ fontFamily: "'Caveat Brush', cursive", fontSize: 22, color: C.terra }}>{day.net}</span>
+              <span aria-label={`${day.net} kcal`} style={{ fontFamily: T.display, fontSize: 22, color: C.terra }}>{day.net}</span>
             </li>
           ))}
         </ul>
@@ -761,7 +786,7 @@ function ProfileScreen({ profile, onSave }) {
 
   const fieldStyle = {
     width: 130,
-    fontFamily: "'Caveat Brush', cursive",
+    fontFamily: T.display,
     fontSize: 44,
     color: C.black,
     background: "transparent",
@@ -773,35 +798,35 @@ function ProfileScreen({ profile, onSave }) {
 
   return (
     <div style={{ padding: "32px 20px" }}>
-      <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 36 }}>Profile</p>
+      <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 36 }}>Profile</p>
 
       <div style={{ background: C.card, borderRadius: 16, border: `0.5px solid ${C.divider}`, padding: "20px 20px 16px", marginBottom: 12 }}>
-        <label htmlFor="profile-maintenance" style={{ display: "block", fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 }}>
+        <label htmlFor="profile-maintenance" style={{ display: "block", fontFamily: T.ui, fontSize: 12, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>
           Maintenance
         </label>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <input id="profile-maintenance" type="number" value={maintenance} onChange={e => setMaintenance(e.target.value)} style={fieldStyle} aria-describedby="maintenance-hint" />
-          <span aria-hidden="true" style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted }}>kcal / day</span>
+          <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 13, color: C.muted }}>kcal / day</span>
         </div>
-        <p id="maintenance-hint" style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
+        <p id="maintenance-hint" style={{ fontFamily: T.ui, fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
           Your TDEE — calories burned on a typical day.
         </p>
       </div>
 
       <div style={{ background: C.card, borderRadius: 16, border: `0.5px solid ${C.divider}`, padding: "20px 20px 16px", marginBottom: 32 }}>
-        <label htmlFor="profile-goal" style={{ display: "block", fontFamily: "'Inter', sans-serif", fontSize: 12, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 }}>
+        <label htmlFor="profile-goal" style={{ display: "block", fontFamily: T.ui, fontSize: 12, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>
           Goal
         </label>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <input id="profile-goal" type="number" value={goal} onChange={e => setGoal(e.target.value)} style={fieldStyle} aria-describedby="goal-hint" />
-          <span aria-hidden="true" style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: C.muted }}>kcal / day</span>
+          <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 13, color: C.muted }}>kcal / day</span>
         </div>
-        <p id="goal-hint" style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
+        <p id="goal-hint" style={{ fontFamily: T.ui, fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
           Your daily calorie target. The ring fills to this number.
         </p>
       </div>
 
-      <button onClick={save} style={{ padding: "13px 32px", background: saved ? "#5A9E6A" : C.terra, border: "none", borderRadius: 12, fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer", transition: "background .3s" }}>
+      <button onClick={save} style={{ padding: "13px 32px", background: saved ? "#5A9E6A" : C.terra, border: "none", borderRadius: 12, fontFamily: T.ui, fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer", transition: M.saveBg }}>
         {saved ? "Saved ✓" : "Save"}
       </button>
       <div aria-live="polite" aria-atomic="true" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>
@@ -855,7 +880,7 @@ export default function Nutritak() {
   const closeSheet = useCallback(() => setSheet(null), []);
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, maxWidth: 430, margin: "0 auto", fontFamily: "'Inter', sans-serif", overflowX: "hidden" }}>
+    <div style={{ minHeight: "100vh", background: C.bg, maxWidth: 430, margin: "0 auto", fontFamily: T.ui, overflowX: "hidden" }}>
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
         button { -webkit-tap-highlight-color: transparent; cursor: pointer; }
@@ -892,7 +917,7 @@ export default function Nutritak() {
 
         {/* Recently logged */}
         <div style={{ margin: "24px 12px 8px" }}>
-          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", padding: "0 2px 6px" }}>
+          <div style={{ fontFamily: T.ui, fontSize: 12, fontWeight: 500, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", padding: "0 2px 6px" }}>
             recently logged
           </div>
 
@@ -909,7 +934,7 @@ export default function Nutritak() {
                   </div>
                 </div>
               </div>
-              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: C.muted, textAlign: "center", padding: "0 24px 16px" }}>
+              <p style={{ fontFamily: T.ui, fontSize: 14, color: C.muted, textAlign: "center", padding: "0 24px 16px" }}>
                 Tap + to add your first meal of the day
               </p>
             </div>
