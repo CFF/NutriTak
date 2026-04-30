@@ -40,8 +40,10 @@ Emotional goal: **motivating and clear.** Progress is always visible. The big nu
 - React 18 + Vite (no CSS framework, all inline styles)
 - Lucide React for icons
 - Google Fonts: DM Serif Display + Courier Prime (loaded via @import in component)
-- OpenRouter API (proxied via Vite) for AI food estimation — free models, no cost to user, key is server-side only
+- OpenRouter API (proxied via Vite/Vercel) for AI food estimation and vision — free models, key is server-side only
+- USDA FoodData Central API (proxied via Vite/Vercel) for text food lookup — free key, server-side only (`USDA_FDC_API_KEY`)
 - Dexie (IndexedDB) for all persistence (logs keyed by date, food history, profile)
+- heic2any — HEIC→JPEG conversion for photos taken on iPhone
 
 ---
 
@@ -49,10 +51,11 @@ Emotional goal: **motivating and clear.** Progress is always visible. The big nu
 
 These are settled decisions. Don't relitigate them without a reason.
 
-**AI estimation flow**
-- AI picks a default calorie estimate; user confirms or edits. Not a form.
-- One clarifying question max before committing to an estimate. Default to a reasonable guess.
-- Photo estimation returns a per-item list. User reviews, edits individual values, removes items, then adds. Confidence shown as a tip (not a percentage). "Review before saving" is the pattern.
+**Food logging — two paths, one sheet**
+- **Text path (primary):** user types a food name → USDA FDC lookup returns up to 5 DB matches → user taps the closest one → confirm with serving stepper. "Generate with AI" button at the bottom of results triggers the AI fallback. If FDC returns nothing, AI fallback fires automatically.
+- **Photo path (secondary):** camera icon on the input screen → user takes/picks a photo → vision AI (multimodal model via OpenRouter) identifies every ingredient with quantity → per-item review list → user can edit, remove, or add items → "Add all to log" saves each item as a separate food entry.
+- **AI text fallback:** one clarifying question max. Default to a reasonable guess. Returns a single `{ name, calories, protein, carbs, fats, portion }` object → same confirm screen as FDC path.
+- "Review before saving" is the pattern for the photo path. Editable, removable per item.
 
 **Distribution**
 - Users supply no API key. OpenRouter key is server-side, proxied through Vite. Zero friction, zero cost to user.

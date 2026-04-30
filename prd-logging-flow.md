@@ -3,9 +3,9 @@
 > Derived from: [PRD.md](PRD.md)
 > Any principle not explicitly overridden here follows the product PRD.
 
-**Version:** 1.1
-**Date:** April 2026
-**Status:** Ready to build
+**Version:** 1.2
+**Date:** April 29, 2026
+**Status:** Active
 **Author:** Claire
 
 ---
@@ -32,7 +32,9 @@ Same as product PRD. Primary user is Claire, logging 3–5 times per day, wants 
 
 - [ ] Tapping "+" opens a FAB fan with three labeled sub-actions: Food, Water, Exercise
 - [ ] Tapping anywhere outside the fan closes it without logging anything
-- [ ] **Food flow:** user types a description → AI returns name + calories + protein + carbs + fats → confirm screen → entry added to journal
+- [ ] **Food flow — text path:** user types a food description → USDA FDC returns up to 5 matching entries → user picks one → confirm screen → entry added to journal
+- [ ] **Food flow — text path fallback:** "Generate with AI" button at the bottom of results → AI estimation → clarify if needed → confirm screen → entry added to journal
+- [ ] **Food flow — photo path:** user taps camera icon → takes photo or picks from library → vision AI identifies each ingredient with quantity → per-item review list → user can edit, remove, or add items → all items logged as separate entries
 - [ ] **Water flow:** user taps a preset (250ml, 500ml, 750ml) or enters a custom ml value → entry added immediately
 - [ ] **Exercise flow:** user types a description → AI returns activity name + calories burned → confirm screen → entry added to journal
 - [ ] All three entry types appear inline in the "Recently Logged" list, visually distinguished by type
@@ -63,26 +65,59 @@ Each sub-action shows an icon and a text label. Tapping a sub-action opens the c
 
 ### Food flow
 
-**Step 1 — Input sheet**
+The food sheet opens with two entry points: a text input (default, autofocused) and a camera icon button in the top-right corner of the sheet. Each leads to a separate sub-path but both converge on the same confirm screen pattern.
+
+---
+
+#### Text path (primary)
+
+**Step 1 — Input**
 - Bottom sheet slides up
-- Single text input: "What did you eat?"
-- Autofocus on open
-- Submit on Enter or tap "Look up" button
-- Sheet dismisses on swipe down or tap outside
+- Single text input: "Search for a food…", autofocused
+- Camera icon button top-right → switches to photo path
+- Submit on Enter or tap "Search" button
 
-**Step 2 — AI call**
-- Send description to OpenRouter
-- AI must return a structured response: `{ name, calories, protein, carbs, fats, portion }`
-- Calories and macros are integers (grams for macros, kcal for calories)
-- One clarifying question allowed if the input is ambiguous — AI asks in the same sheet before committing
-- If no clarification needed, go straight to confirm screen
+**Step 2 — FDC results**
+- Query `/api/fdc?query={text}` (USDA FoodData Central, proxied server-side)
+- Show up to 5 matching entries, each card: food name, brand or "Generic", kcal · serving size
+- User taps a card → goes to confirm screen
+- "Generate with AI" button at the bottom of the list → goes to AI sub-path
+- If FDC returns zero results → automatically fall through to AI sub-path with the typed text pre-filled
 
-**Step 3 — Confirm screen**
-- Shows: food name, calorie estimate, macro breakdown (protein / carbs / fats), portion description
-- Serving stepper: ×0.5 increments, range ×0.5 to ×5. All values scale proportionally.
-- "Add to log" primary button → adds entry, sheet closes
-- "Start over" secondary link → returns to input
-- User can tap any value to edit it manually before confirming
+**Step 2b — AI sub-path (fallback)**
+- User describes what they ate in a text input (pre-filled if coming from a failed FDC search)
+- One clarifying question allowed if input is ambiguous
+- Returns `{ name, calories, protein, carbs, fats, portion }`
+
+**Step 3 — Confirm screen (single item)**
+- Shows: food name, calorie value, macro breakdown, portion/serving description
+- Serving stepper: ×0.5 increments, ×0.5 to ×5. All values scale proportionally.
+- "Add to log" primary button → entry added, sheet closes
+- "Start over" secondary link → returns to Step 1
+
+---
+
+#### Photo path (secondary)
+
+**Step 1 — Camera / image picker**
+- Triggered by tapping the camera icon on the input screen
+- Opens `<input type="file" accept="image/*" capture="environment">` — on mobile this opens the camera; on desktop, a file picker
+- HEIC images converted to JPEG via `heic2any` before sending
+- Image compressed client-side to max 1200px / 80% quality before encoding to base64
+
+**Step 2 — Vision AI call**
+- Image sent to OpenRouter as a multimodal message (base64 data URL)
+- Vision model identifies each ingredient with estimated quantity
+- Returns a JSON array: `[{ name, calories, protein, carbs, fats, portion }, ...]`
+- Show loading state: "Analysing your meal…"
+
+**Step 3 — Per-item review screen**
+- Shows the photo thumbnail at top
+- Below: list of identified items, each showing name, kcal, portion
+- Per item: tap name or kcal to edit inline; swipe or tap trash icon to remove
+- "Add item manually" link at the bottom → opens a single-item text input (same AI sub-path as text fallback)
+- "Add all to log" primary button → each item saved as a separate food entry, sheet closes
+- "Retake" secondary link → returns to Step 1
 
 **Entry data model (food):**
 ```js
@@ -210,9 +245,56 @@ Three bars below the ring: Protein, Carbs, Fats.
 
 ---
 
-## AI prompt contracts
+## API contracts
 
-### Food lookup prompt
+### USDA FoodData Central — food search (text path)
+
+Endpoint proxied via `/api/fdc`:
+```
+GET https://api.nal.usda.gov/fdc/v1/foods/search
+  ?query={query}
+  &pageSize=5
+  &dataType=Branded,Foundation,SR%20Legacy
+  &api_key={USDA_FDC_API_KEY}   ← injected server-side only
+```
+
+Nutrients extracted per result (by nutrient ID):
+- `1008` → calories (kcal)
+- `1003` → protein (g)
+- `1005` → carbohydrate (g)
+- `1004` → total fat (g)
+
+Serving: use `servingSize` + `servingSizeUnit` when present on Branded items; default to "100g" for Foundation/SR Legacy.
+
+Environment variable required: `USDA_FDC_API_KEY` (free key at fdc.nal.usda.gov/api-key-signup — `DEMO_KEY` works for development).
+
+---
+
+### Vision AI prompt (photo path)
+
+Vision model: prefer `google/gemini-2.0-flash-exp:free` or `meta-llama/llama-3.2-11b-vision-instruct:free` via OpenRouter.
+
+Multimodal message format: image sent as base64 data URL in the `image_url` content block alongside the text prompt.
+
+```
+You are a nutrition assistant. Identify every distinct food item visible in this photo.
+Return ONLY a JSON array, no markdown, no explanation.
+
+Required format:
+[
+  { "name": "Chicken Breast", "calories": 243, "protein": 46, "carbs": 0,  "fats": 5, "portion": "3 pieces (~300g)" },
+  { "name": "Yellow Rice",    "calories": 143, "protein": 3,  "carbs": 30, "fats": 1, "portion": "1 serving (~120g)" }
+]
+
+Rules:
+- Each distinct ingredient or component gets its own object
+- calories, protein, carbs, fats must be integers
+- portion is a human-readable string (count, volume, or weight estimate) of what you see in the photo
+- If you cannot identify something precisely, make your best guess — do not omit it
+- Do not add commentary, caveats, or extra fields
+```
+
+### Text AI fallback prompt (text path — AI sub-path)
 
 ```
 You are a nutrition assistant. The user described a food or meal. Return ONLY a JSON object, no markdown, no explanation.
@@ -262,11 +344,15 @@ User input: "{description}"
 
 ## Non-functional requirements
 
-- Each AI call must complete in under 10 seconds on a standard mobile connection; show a loading state while waiting
+- FDC text lookup must complete in under 2 seconds; show loading state while waiting
+- Vision AI photo call must complete in under 15 seconds; show "Analysing your meal…" loading state
+- Text AI fallback call must complete in under 10 seconds; show loading state
 - All entries persist in IndexedDB via Dexie on the same day-keyed structure as existing logs
-- The flow must work offline for water entries (no AI call); food and exercise require network
+- The flow must work offline for water entries; food and exercise require network
+- Images are compressed client-side before sending (max 1200px, 80% JPEG quality) to keep payloads reasonable
 - Sheet open/close animations must run at 60fps — use CSS transitions, not JS animation loops
 - FAB fan animation: stagger the three buttons with 40ms delay between each
+- Environment variables required: `OPENROUTER_API_KEY` (existing), `USDA_FDC_API_KEY` (new — free key at fdc.nal.usda.gov/api-key-signup, `DEMO_KEY` works for dev)
 
 ---
 
@@ -289,22 +375,20 @@ Each day's record holds an array of entries. New entry types (water, exercise) s
 
 | Component | Action | Notes |
 |---|---|---|
-| `FAB` | Build new | Fan-out animation, three sub-actions, scrim |
-| `FoodSheet` | Build new | Input → AI call → confirm screen |
-| `WaterSheet` | Build new | Presets + custom input, no AI |
-| `ExerciseSheet` | Build new | Input → AI call → confirm screen |
-| `LogEntry` | Build new | Row component handles food / water / exercise display + inline edit/delete |
-| `RecentlyLogged` | Modify | Replace placeholder list with real `LogEntry` rows |
-| `CalorieRing` | Modify | Wire to net calories, animate on update |
-| `MacroBars` | Modify | Wire to live food totals, animate on update |
-| `HomeScreen` | Modify | Compose all of the above, pass state down |
-| `src/lib/storage.js` | Modify | Add `saveEntry`, `deleteEntry`, `updateEntry`, `getEntriesByDate` if not already present |
+| `FAB` | Built | Fan-out animation, three sub-actions, scrim |
+| `FoodSheet` | Modify | Add FDC text path (search → select), photo path (camera → vision AI → per-item review), keep existing AI path as fallback |
+| `WaterSheet` | Built | Presets + custom input, no AI |
+| `ExerciseSheet` | Built | Input → AI call → confirm screen |
+| `LogEntry` | Built | Row component handles food / water / exercise display + inline edit/delete |
+| `api/fdc.js` | Build new | Vercel serverless function; proxies USDA FDC search, injects API key, returns cleaned results |
+| `vite.config.js` | Modify | Add `/api/fdc` proxy for local dev |
+| `src/lib/storage.js` | No change | `saveEntry`, `deleteEntry`, `updateEntry`, `getEntriesByDate` already present |
 
 ---
 
 ## Out of scope
 
-- Photo estimation in this flow (already built as a separate feature — 6.3)
+- Per-photo item confidence scores or explanations
 - Quick chips / food history in the food sheet (already built — 6.6; integrate in a follow-up)
 - Macro editing inline (name + calories only for inline edit)
 - Water goal tracking or hydration progress bar
@@ -316,8 +400,11 @@ Each day's record holds an array of entries. New entry types (water, exercise) s
 
 ## Open questions
 
-| Question | Decision |
-|---|---|
-| Should macro targets (protein/carbs/fats) be editable in the profile screen? | **Closed.** Hardcode defaults (120g protein / 200g carbs / 65g fats) now. Add editable macro targets to the profile screen in a follow-up once the coach's nutrition plan is available. |
-| Should exercise entries reduce the ring fill or use a separate visual treatment? | **Closed.** Exercise calories burned increase the remaining budget. Net = food calories − exercise calories. Ring fill and remaining number both reflect net. No separate visual treatment needed. |
-| Should the FAB hide when a sheet is open? | **Closed.** Yes — hide the FAB whenever any sheet is open. The sheet covers the bottom of the screen and the FAB behind it creates visual noise. Restore it when the sheet closes. |
+**Should macro targets (protein/carbs/fats) be editable in the profile screen?**
+Closed. Hardcode defaults (120g protein / 200g carbs / 65g fats) now. Add editable macro targets to the profile screen in a follow-up once the coach's nutrition plan is available.
+
+**Should exercise entries reduce the ring fill or use a separate visual treatment?**
+Closed. Exercise calories burned increase the remaining budget. Net = food calories − exercise calories. Ring fill and remaining number both reflect net. No separate visual treatment needed.
+
+**Should the FAB hide when a sheet is open?**
+Closed. Yes — hide the FAB whenever any sheet is open. The sheet covers the bottom of the screen and the FAB behind it creates visual noise. Restore it when the sheet closes.
