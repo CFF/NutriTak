@@ -126,6 +126,76 @@ async function callOpenRouter(messages) {
   throw lastError || new Error("All models failed");
 }
 
+// ─── Vision AI ────────────────────────────────────────────────────────
+const VISION_MODELS = [
+  "nvidia/nemotron-nano-12b-v2-vl:free",
+  "google/gemma-4-31b-it:free",
+];
+
+const VISION_PROMPT = `You are a nutrition assistant. Identify every distinct food item visible in this photo.
+Return ONLY a JSON array, no markdown, no explanation.
+
+Required format:
+[
+  { "name": "Chicken Breast", "calories": 243, "protein": 46, "carbs": 0, "fats": 5, "portion": "3 pieces (~300g)" },
+  { "name": "Yellow Rice", "calories": 143, "protein": 3, "carbs": 30, "fats": 1, "portion": "1 serving (~120g)" }
+]
+
+Rules:
+- Each distinct ingredient or component gets its own object
+- calories, protein, carbs, fats must be integers
+- portion is a human-readable string (count, volume, or weight estimate) of what you see in the photo
+- If you cannot identify something precisely, make your best guess — do not omit it
+- Do not add commentary, caveats, or extra fields`;
+
+async function callVisionAI(dataUrl) {
+  const messages = [{
+    role: "user",
+    content: [
+      { type: "image_url", image_url: { url: dataUrl } },
+      { type: "text", text: VISION_PROMPT },
+    ],
+  }];
+  let lastError;
+  for (const model of VISION_MODELS) {
+    try {
+      return await tryModel(model, messages, 30000);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("Vision models failed");
+}
+
+async function compressImage(file) {
+  let blob = file;
+  if (file.type === "image/heic" || file.name?.toLowerCase().endsWith(".heic")) {
+    const heic2any = (await import("heic2any")).default;
+    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.8 });
+    blob = Array.isArray(converted) ? converted[0] : converted;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objUrl = URL.createObjectURL(blob);
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      const MAX = 1200;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > MAX || h > MAX) {
+        const scale = MAX / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.8));
+    };
+    img.src = objUrl;
+  });
+}
+
 // ─── Arc Gauge ────────────────────────────────────────────────────────
 function ArcGauge({ net, floor, goal }) {
   const color     = ringColor(net, floor, goal);
@@ -356,26 +426,91 @@ function Sheet({ onClose, label, title, children }) {
 
 // ─── Food Sheet ───────────────────────────────────────────────────────
 function FoodSheet({ onAdd, onClose }) {
-  const [phase, setPhase]         = useState("input");
-  const [text, setText]           = useState("");
-  const [clarifyQ, setClarifyQ]   = useState("");
-  const [clarifyA, setClarifyA]   = useState("");
-  const [result, setResult]       = useState(null);
-  const [servings, setServings]   = useState(1);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState("");
-  const inputRef                  = useRef();
+  const [phase, setPhase]           = useState("input");
+  // "input" | "fdc-results" | "clarify" | "confirm" | "photo-review"
+  const [text, setText]             = useState("");
+  const [loading, setLoading]       = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("");
+  const [error, setError]           = useState("");
+
+  // FDC results
+  const [fdcResults, setFdcResults] = useState([]);
+
+  // Confirm (single item — FDC pick or AI)
+  const [result, setResult]         = useState(null);
+  const [servings, setServings]     = useState(1);
+
+  // Clarify (AI)
+  const [clarifyQ, setClarifyQ]     = useState("");
+  const [clarifyA, setClarifyA]     = useState("");
+
+  // Photo review
+  const [photoThumb, setPhotoThumb]     = useState(null);
+  const [photoItems, setPhotoItems]     = useState([]);
+  const [addManualOpen, setAddManualOpen] = useState(false);
+  const [addManualText, setAddManualText] = useState("");
+  const [addManualLoading, setAddManualLoading] = useState(false);
+
+  const inputRef = useRef();
+  const fileRef  = useRef();
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   const FOOD_PROMPT = (desc) =>
     `You are a nutrition assistant. The user described a food or meal. Return ONLY a JSON object, no markdown, no explanation.\n\nRequired format:\n{\n  "name": "Short food name",\n  "calories": 350,\n  "protein": 12,\n  "carbs": 45,\n  "fats": 8,\n  "portion": "1 medium bowl (approx 300g)"\n}\n\nRules:\n- calories, protein, carbs, fats must be integers\n- If the description is ambiguous and one question would meaningfully change the estimate, return:\n  { "clarify": "Your question here?" }\n- Ask at most one clarifying question. If still ambiguous after one answer, commit to a reasonable default.\n- Do not add commentary, caveats, or extra fields.\n\nUser input: "${desc}"`;
 
-  const lookup = async (messages) => {
+  // FDC search → results or AI fallback
+  const doFDCSearch = async () => {
+    if (!text.trim() || loading) return;
     setLoading(true);
+    setLoadingMsg("Searching…");
+    setError("");
+
+    let results = [];
+    try {
+      const res = await fetch(`/api/fdc?query=${encodeURIComponent(text.trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        results = data.results || [];
+      }
+    } catch {
+      // FDC unavailable — fall through to AI
+    }
+
+    if (results.length > 0) {
+      setFdcResults(results);
+      setPhase("fdc-results");
+      setLoading(false);
+    } else {
+      // Auto-fallback to AI estimation
+      setLoadingMsg("Estimating with AI…");
+      try {
+        const data = await callOpenRouter([{ role: "user", content: FOOD_PROMPT(text.trim()) }]);
+        if (data.clarify) {
+          setClarifyQ(data.clarify);
+          setPhase("clarify");
+        } else {
+          setResult(data);
+          setServings(1);
+          setPhase("confirm");
+        }
+      } catch {
+        setError("Couldn't find or estimate. Check your connection and try again.");
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Explicit AI lookup (from "Generate with AI" button or clarify submit)
+  const doAILookup = async (desc, messages = null) => {
+    if (loading) return;
+    setLoading(true);
+    setLoadingMsg("Estimating with AI…");
     setError("");
     try {
-      const data = await callOpenRouter(messages);
+      const msgs = messages || [{ role: "user", content: FOOD_PROMPT(desc) }];
+      const data = await callOpenRouter(msgs);
       if (data.clarify) {
         setClarifyQ(data.clarify);
         setPhase("clarify");
@@ -384,25 +519,26 @@ function FoodSheet({ onAdd, onClose }) {
         setServings(1);
         setPhase("confirm");
       }
-    } catch (e) {
+    } catch {
       setError("Couldn't estimate. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const submit = () => {
-    if (!text.trim()) return;
-    lookup([{ role: "user", content: FOOD_PROMPT(text.trim()) }]);
-  };
-
   const submitClarify = () => {
-    if (!clarifyA.trim()) return;
-    lookup([
+    if (!clarifyA.trim() || loading) return;
+    doAILookup(text.trim(), [
       { role: "user", content: FOOD_PROMPT(text.trim()) },
       { role: "assistant", content: JSON.stringify({ clarify: clarifyQ }) },
       { role: "user", content: clarifyA.trim() },
     ]);
+  };
+
+  const pickFromFDC = (item) => {
+    setResult({ name: item.name, calories: item.calories, protein: item.protein, carbs: item.carbs, fats: item.fats, portion: item.serving });
+    setServings(1);
+    setPhase("confirm");
   };
 
   const confirmAdd = () => {
@@ -413,20 +549,153 @@ function FoodSheet({ onAdd, onClose }) {
       date: todayStr(),
       name: result.name,
       calories: Math.round(result.calories * s),
-      protein:  Math.round(result.protein  * s),
-      carbs:    Math.round(result.carbs    * s),
-      fats:     Math.round(result.fats     * s),
-      portion:  result.portion,
+      protein:  Math.round((result.protein || 0) * s),
+      carbs:    Math.round((result.carbs   || 0) * s),
+      fats:     Math.round((result.fats    || 0) * s),
+      portion:  result.portion || "",
       loggedAt: new Date().toISOString(),
     });
     onClose();
   };
 
-  const inputStyle = { width: "100%", fontFamily: T.ui, fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none", marginBottom: 12 };
+  // Photo path
+  const handlePhotoFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setLoading(true);
+    setLoadingMsg("Analysing your meal…");
+    setError("");
+    try {
+      const dataUrl = await compressImage(file);
+      setPhotoThumb(dataUrl);
+      const items = await callVisionAI(dataUrl);
+      if (!Array.isArray(items) || items.length === 0) throw new Error("No items detected");
+      setPhotoItems(items);
+      setPhase("photo-review");
+    } catch {
+      setError("Couldn't analyse the photo. Try again or describe your meal instead.");
+      setPhase("input");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updatePhotoItem = (i, field, value) =>
+    setPhotoItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
+
+  const removePhotoItem = (i) =>
+    setPhotoItems(prev => prev.filter((_, idx) => idx !== i));
+
+  const addManualItem = async () => {
+    if (!addManualText.trim() || addManualLoading) return;
+    setAddManualLoading(true);
+    try {
+      const data = await callOpenRouter([{ role: "user", content: FOOD_PROMPT(addManualText.trim()) }]);
+      const item = data.clarify
+        ? { name: addManualText.trim(), calories: 0, protein: 0, carbs: 0, fats: 0, portion: "" }
+        : data;
+      setPhotoItems(prev => [...prev, item]);
+      setAddManualText("");
+      setAddManualOpen(false);
+    } catch {
+      // silently ignore — user can retry
+    } finally {
+      setAddManualLoading(false);
+    }
+  };
+
+  const confirmAllPhoto = () => {
+    photoItems.forEach(item => {
+      onAdd({
+        type: "food",
+        date: todayStr(),
+        name: item.name,
+        calories: parseInt(item.calories, 10) || 0,
+        protein:  parseInt(item.protein,  10) || 0,
+        carbs:    parseInt(item.carbs,    10) || 0,
+        fats:     parseInt(item.fats,     10) || 0,
+        portion:  item.portion || "",
+        loggedAt: new Date().toISOString(),
+      });
+    });
+    onClose();
+  };
+
   const btnPrimary = { width: "100%", padding: "14px", background: C.terra, border: "none", borderRadius: 12, fontFamily: T.ui, fontSize: 15, fontWeight: 600, color: "#fff", cursor: "pointer" };
 
+  // Loading overlay
+  if (loading) return (
+    <div style={{ textAlign: "center", padding: "48px 0" }}>
+      <p style={{ fontFamily: T.ui, fontSize: 14, color: C.muted }}>{loadingMsg || "Loading…"}</p>
+    </div>
+  );
+
+  // Photo review
+  if (phase === "photo-review") return (
+    <div>
+      {photoThumb && (
+        <img src={photoThumb} alt="Your meal" style={{ width: "100%", borderRadius: 12, marginBottom: 16, objectFit: "cover", maxHeight: 180 }} />
+      )}
+      <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 12 }}>Review items</p>
+      {photoItems.length === 0 && (
+        <p style={{ fontFamily: T.ui, fontSize: 14, color: C.muted, marginBottom: 16 }}>No items detected. Add them manually below.</p>
+      )}
+      <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px" }}>
+        {photoItems.map((item, i) => (
+          <li key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: C.emptyBg, borderRadius: 12, padding: "10px 12px", marginBottom: 6 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <input value={item.name} onChange={e => updatePhotoItem(i, "name", e.target.value)}
+                aria-label={`Name for item ${i + 1}`}
+                style={{ width: "100%", fontFamily: T.ui, fontSize: 13, color: C.black, background: "transparent", border: "none", outline: "none", padding: 0 }} />
+              {item.portion && <div style={{ fontFamily: T.ui, fontSize: 11, color: C.muted, marginTop: 2 }}>{item.portion}</div>}
+            </div>
+            <input type="number" value={item.calories} onChange={e => updatePhotoItem(i, "calories", e.target.value)}
+              aria-label={`Calories for item ${i + 1}`}
+              style={{ width: 48, fontFamily: T.ui, fontSize: 13, fontWeight: 600, color: C.terra, background: "transparent", border: "none", outline: "none", textAlign: "right", padding: 0 }} />
+            <span style={{ fontFamily: T.ui, fontSize: 11, color: C.muted }}>kcal</span>
+            <button onClick={() => removePhotoItem(i)} aria-label={`Remove ${item.name}`}
+              style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, minWidth: 36, minHeight: 36, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+              </svg>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {addManualOpen ? (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input value={addManualText} onChange={e => setAddManualText(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && addManualItem()}
+            placeholder="Describe the item…"
+            autoFocus
+            style={{ flex: 1, fontFamily: T.ui, fontSize: 14, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 10, padding: "10px 12px", outline: "none" }} />
+          <button onClick={addManualItem} disabled={addManualLoading || !addManualText.trim()}
+            style={{ padding: "10px 16px", background: C.terra, border: "none", borderRadius: 10, fontFamily: T.ui, fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer", opacity: addManualLoading || !addManualText.trim() ? 0.5 : 1 }}>
+            {addManualLoading ? "…" : "Add"}
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => setAddManualOpen(true)}
+          style={{ width: "100%", padding: "10px", background: "none", border: `1px dashed ${C.divider}`, borderRadius: 10, fontFamily: T.ui, fontSize: 13, color: C.muted, cursor: "pointer", marginBottom: 12 }}>
+          + Add item manually
+        </button>
+      )}
+      {error && <p role="alert" style={{ fontFamily: T.ui, fontSize: 12, color: C.red, marginBottom: 8 }}>{error}</p>}
+      <button onClick={confirmAllPhoto} disabled={photoItems.length === 0}
+        style={{ ...btnPrimary, opacity: photoItems.length === 0 ? 0.5 : 1 }}>
+        Add all to log
+      </button>
+      <button onClick={() => { setPhase("input"); setPhotoThumb(null); setPhotoItems([]); setError(""); }}
+        style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: T.ui, fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>
+        Retake
+      </button>
+    </div>
+  );
+
+  // Confirm (single item)
   if (phase === "confirm" && result) {
-    const scaled = (v) => Math.round(v * servings);
+    const scaled = (v) => Math.round((v || 0) * servings);
     const STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5];
     return (
       <div>
@@ -448,7 +717,6 @@ function FoodSheet({ onAdd, onClose }) {
               ))}
             </div>
           </div>
-          {/* Serving stepper */}
           <div role="group" aria-label="Number of servings" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {STEPS.map(s => (
               <button key={s} onClick={() => setServings(s)}
@@ -461,35 +729,83 @@ function FoodSheet({ onAdd, onClose }) {
           </div>
         </div>
         <button onClick={confirmAdd} style={btnPrimary}>Add to log</button>
-        <button onClick={() => { setPhase("input"); setResult(null); }} style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: T.ui, fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>Start over</button>
+        <button onClick={() => { setPhase("input"); setResult(null); }}
+          style={{ width: "100%", padding: "12px", background: "none", border: "none", fontFamily: T.ui, fontSize: 13, color: C.muted, cursor: "pointer", marginTop: 8 }}>
+          Start over
+        </button>
       </div>
     );
   }
 
+  // Clarify
   if (phase === "clarify") return (
     <div>
       <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 12 }}>One quick question</p>
       <div style={{ background: C.card, borderRadius: 12, border: `1px solid ${C.divider}`, padding: "14px 16px", marginBottom: 12, fontFamily: T.ui, fontSize: 14, color: C.black }}>{clarifyQ}</div>
       <label htmlFor="food-clarify-input" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>Your answer</label>
-      <input id="food-clarify-input" ref={inputRef} value={clarifyA} onChange={e => setClarifyA(e.target.value)}
+      <input id="food-clarify-input" value={clarifyA} onChange={e => setClarifyA(e.target.value)}
         onKeyDown={e => e.key === "Enter" && submitClarify()}
-        placeholder="Your answer…" style={inputStyle} />
+        placeholder="Your answer…"
+        autoFocus
+        style={{ width: "100%", fontFamily: T.ui, fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none", marginBottom: 12 }} />
       {error && <p role="alert" style={{ fontFamily: T.ui, fontSize: 12, color: C.red, marginBottom: 8 }}>{error}</p>}
-      <button onClick={submitClarify} disabled={loading || !clarifyA.trim()} aria-busy={loading} style={{ ...btnPrimary, opacity: loading || !clarifyA.trim() ? 0.5 : 1 }}>
-        {loading ? "Looking up…" : "Continue"}
+      <button onClick={submitClarify} disabled={!clarifyA.trim()}
+        style={{ ...btnPrimary, opacity: !clarifyA.trim() ? 0.5 : 1 }}>
+        Continue
       </button>
     </div>
   );
 
+  // FDC results
+  if (phase === "fdc-results") return (
+    <div>
+      <p style={{ fontFamily: T.ui, fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 12 }}>Select a match</p>
+      <ul style={{ listStyle: "none", padding: 0, margin: "0 0 12px" }}>
+        {fdcResults.map(item => (
+          <li key={item.fdcId}>
+            <button onClick={() => pickFromFDC(item)}
+              style={{ width: "100%", textAlign: "left", background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
+                <div style={{ fontFamily: T.ui, fontSize: 14, fontWeight: 500, color: C.black, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</div>
+                <div style={{ fontFamily: T.ui, fontSize: 11, color: C.muted, marginTop: 2 }}>{item.brand || "Generic"}</div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontFamily: T.ui, fontSize: 14, fontWeight: 600, color: C.terra }}>{item.calories} kcal</div>
+                <div style={{ fontFamily: T.ui, fontSize: 11, color: C.muted }}>{item.serving}</div>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button onClick={() => doAILookup(text)}
+        style={{ width: "100%", padding: "13px", background: "none", border: `1px solid ${C.divider}`, borderRadius: 12, fontFamily: T.ui, fontSize: 14, color: C.muted, cursor: "pointer" }}>
+        Generate with AI
+      </button>
+    </div>
+  );
+
+  // Default: input phase
   return (
     <div>
-      <label htmlFor="food-input" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>Describe what you ate</label>
-      <input id="food-input" ref={inputRef} value={text} onChange={e => setText(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && submit()}
-        placeholder="e.g. bowl of oatmeal with berries…" style={inputStyle} />
+      <input type="file" ref={fileRef} accept="image/*" capture="environment"
+        onChange={handlePhotoFile} style={{ display: "none" }} aria-hidden="true" />
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <label htmlFor="food-input" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>Search for a food</label>
+        <input id="food-input" ref={inputRef} value={text} onChange={e => setText(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && doFDCSearch()}
+          placeholder="Search for a food…"
+          style={{ flex: 1, fontFamily: T.ui, fontSize: 16, color: C.black, background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, padding: "14px 16px", outline: "none" }} />
+        <button onClick={() => fileRef.current?.click()} aria-label="Log from photo"
+          style={{ padding: "14px", background: C.card, border: `1px solid ${C.divider}`, borderRadius: 12, cursor: "pointer", color: C.muted, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>
+          </svg>
+        </button>
+      </div>
       {error && <p role="alert" style={{ fontFamily: T.ui, fontSize: 12, color: C.red, marginBottom: 8 }}>{error}</p>}
-      <button onClick={submit} disabled={loading || !text.trim()} aria-busy={loading} style={{ ...btnPrimary, opacity: loading || !text.trim() ? 0.5 : 1 }}>
-        {loading ? "Looking up…" : "Look up"}
+      <button onClick={doFDCSearch} disabled={!text.trim()}
+        style={{ ...btnPrimary, opacity: text.trim() ? 1 : 0.5 }}>
+        Search
       </button>
     </div>
   );
@@ -624,13 +940,13 @@ function FAB({ open, onToggle, onSelect }) {
 
   return (
     <>
-      {/* Scrim */}
+      {/* Scrim — full screen, covers nav (nav at z:50, scrim at z:60) */}
       {open && (
-        <div onClick={onToggle} style={{ position: "fixed", inset: 0, zIndex: 55, background: "rgba(28,25,23,.3)" }} />
+        <div onClick={onToggle} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(28,25,23,.3)" }} />
       )}
 
-      {/* Sub-action cards — horizontal row, centered independently */}
-      <div style={{ position: "fixed", bottom: 28 + 52 + 12, left: "50%", transform: "translateX(-50%)", zIndex: 60, display: "flex", flexDirection: "row", alignItems: "flex-end", gap: 8, pointerEvents: open ? "auto" : "none" }}>
+      {/* Sub-action cards — detached from nav, floating above */}
+      <div style={{ position: "fixed", bottom: 84, left: "50%", transform: "translateX(-50%)", zIndex: 65, display: "flex", flexDirection: "row", alignItems: "flex-end", gap: 12, padding: 16, pointerEvents: open ? "auto" : "none" }}>
         {actions.map((action, i) => (
           <button key={action.key}
             onClick={() => { onToggle(); onSelect(action.key); }}
@@ -638,7 +954,7 @@ function FAB({ open, onToggle, onSelect }) {
             style={{
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
               gap: 8,
-              padding: "18px 12px 14px",
+              padding: "22px 16px 18px",
               background: C.card,
               border: "none",
               borderRadius: 18,
@@ -646,9 +962,9 @@ function FAB({ open, onToggle, onSelect }) {
               cursor: "pointer",
               color: C.black,
               fontFamily: T.ui,
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: 500,
-              width: 90,
+              width: 112,
               opacity: open ? 1 : 0,
               transform: open ? "translateY(0) scale(1)" : "translateY(16px) scale(0.95)",
               transition: `opacity .2s ease ${i * M.stagger}ms, transform .2s ease ${i * M.stagger}ms`,
@@ -658,12 +974,6 @@ function FAB({ open, onToggle, onSelect }) {
           </button>
         ))}
       </div>
-
-      {/* Main FAB — own fixed element, centered by its own 52px width */}
-      <button onClick={onToggle} aria-label={open ? "Close menu" : "Log food, water or exercise"}
-        style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: C.terra, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: SH.fab }}>
-        <span style={{ fontFamily: T.ui, fontSize: 24, fontWeight: 300, color: "#fff", lineHeight: 1, transform: open ? "rotate(45deg)" : "rotate(0deg)", transition: M.fabSpin, display: "block" }}>+</span>
-      </button>
     </>
   );
 }
@@ -674,9 +984,9 @@ function BottomNav({ tab, onTab }) {
     const active = tab === key;
     return (
       <button onClick={() => onTab(key)} aria-label={label} aria-current={active ? "page" : undefined}
-        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: "pointer", padding: "4px 12px", minWidth: 44, minHeight: 44, justifyContent: "center" }}>
+        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: "4px 8px", minWidth: 52, minHeight: 44, justifyContent: "center", outline: "none" }}>
         {icon(active ? C.terra : C.muted)}
-        <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 11, color: active ? C.terra : C.muted }}>
+        <span aria-hidden="true" style={{ fontFamily: T.ui, fontSize: 11, fontWeight: active ? 600 : 400, color: active ? C.terra : C.muted }}>
           {label}
         </span>
       </button>
@@ -684,22 +994,24 @@ function BottomNav({ tab, onTab }) {
   };
 
   return (
-    <nav aria-label="Main navigation" style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, borderTop: `0.5px solid ${C.divider}`, padding: "6px 32px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg, zIndex: 50 }}>
-      {navItem("home", "home", (c) => (
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <nav aria-label="Main navigation" style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, borderTop: `0.5px solid ${C.divider}`, boxShadow: "0 -1px 12px rgba(28,25,23,.06)", padding: "8px 20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg, zIndex: 50 }}>
+      {navItem("home", "Home", (c) => (
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
         </svg>
       ))}
-      {navItem("history", "history", (c) => (
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {navItem("history", "History", (c) => (
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 8v4l3 3"/><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
         </svg>
       ))}
-      {navItem("profile", "profile", (c) => (
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {navItem("profile", "Profile", (c) => (
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/>
         </svg>
       ))}
+      {/* Spacer — preserves nav layout width where Log button was */}
+      <div style={{ width: 48, height: 48, flexShrink: 0 }} />
     </nav>
   );
 }
@@ -959,8 +1271,16 @@ export default function Nutritak() {
       {/* Bottom nav */}
       <BottomNav tab={tab} onTab={(t) => { setTab(t); setFabOpen(false); }} />
 
-      {/* FAB — home tab only */}
-      {tab === "home" && !sheet && <FAB open={fabOpen} onToggle={() => setFabOpen(o => !o)} onSelect={(key) => { setFabOpen(false); setSheet(key); }} />}
+      {/* Log button — fixed, aligned with nav right padding (accounts for centered container) */}
+      {!sheet && (
+        <button onClick={() => setFabOpen(o => !o)} aria-label={fabOpen ? "Close log menu" : "Log food, water or exercise"}
+          style={{ position: "fixed", bottom: 28, right: "calc(max((100vw - 430px) / 2, 0px) + 20px)", width: 48, height: 48, borderRadius: "50%", background: C.terra, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 16px rgba(196,89,58,.35)", zIndex: 70, outline: "none" }}>
+          <span style={{ fontFamily: T.ui, fontSize: 24, fontWeight: 300, color: "#fff", lineHeight: 1, transform: fabOpen ? "rotate(45deg)" : "rotate(0deg)", transition: M.fabSpin, display: "block" }}>+</span>
+        </button>
+      )}
+
+      {/* FAB sub-cards + scrim */}
+      {!sheet && <FAB open={fabOpen} onToggle={() => setFabOpen(o => !o)} onSelect={(key) => { setFabOpen(false); setSheet(key); }} />}
 
       {/* Sheets */}
       {sheet === "food" && (
